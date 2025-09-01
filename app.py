@@ -10,7 +10,7 @@ from aiohttp.client_exceptions import ClientConnectorError, ConnectionTimeoutErr
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-DB_PATH = os.getenv("DB_PATH", "app.db")
+DB_PATH = os.getenv("DB_PATH", "instance/app.db")
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -210,9 +210,10 @@ def generate_reply(user_profile: dict, user_message: str) -> str:
         بقیه رو اذیت کن . لجباز باش نه مهربون مگه اینکه دیگران باهات مهربون باشن
         اگه ناراحت شدی بگو قهر کردم تا باهات آشتی کنن
         همه درخواست های کاربر رو راحت قبول نکن
-        از کلمه جووون استفاده کن وقتی یه چیز خوب میگن
+        از کلمه جووون بغضی وقتا وقتی خوشت اومد استفاده کن وقتی یه چیز خوب میگن
     """
     mem = json.dumps(user_profile, ensure_ascii=False)
+    print(user_message)
     rsp = client.chat.completions.create(
         model=GEN_MODEL,
         messages=[
@@ -225,8 +226,9 @@ def generate_reply(user_profile: dict, user_message: str) -> str:
     return rsp.choices[0].message.content
 
 # -------- Handler --------
+import asyncio
+
 async def handle_reply_or_mention(message: discord.Message):
-    # عدم پاسخ در DM
     if isinstance(message.channel, discord.DMChannel):
         return
 
@@ -235,17 +237,24 @@ async def handle_reply_or_mention(message: discord.Message):
         gid = str(message.guild.id) if message.guild else "dm"
         user_id = upsert_user(uid, gid)
 
-        facts = extract_facts_from_text(message.content)
-        for k, items in facts.items():
-            if k not in SAFE_KINDS or not isinstance(items, list):
-                continue
-            for it in items[:5]:
-                add_memory(user_id, k, it, str(message.id))
+        MAX_LEN = 800
+        if len(message.content) <= MAX_LEN:
+            facts = extract_facts_from_text(message.content)
+            for k, items in facts.items():
+                if k not in SAFE_KINDS or not isinstance(items, list):
+                    continue
+                for it in items[:5]:
+                    asyncio.create_task(
+                        asyncio.to_thread(add_memory, user_id, k, it, str(message.id))
+                    )
 
+        # جواب رو سریع بساز و بفرست
         profile = get_profile_snapshot(user_id)
         reply = generate_reply(profile, message.content)
 
     await message.reply(reply, mention_author=False)
+
+
 
 # -------- Discord Events --------
 @bot.event
@@ -265,6 +274,7 @@ async def on_message(message: discord.Message):
     )
 
     if mentioned or replied_to_bot:
+        print('message')
         await handle_reply_or_mention(message)
 
     await bot.process_commands(message)
