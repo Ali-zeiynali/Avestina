@@ -5,6 +5,7 @@ from discord.ext import commands
 from dotenv import load_dotenv
 from openai import OpenAI
 from aiohttp.client_exceptions import ClientConnectorError, ConnectionTimeoutError
+from langdetect import detect
 
 # -------- Config --------
 load_dotenv()
@@ -28,6 +29,7 @@ CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY,
   discord_user_id TEXT NOT NULL,
   guild_id TEXT NOT NULL,
+  language TEXT,
   UNIQUE(discord_user_id, guild_id)
 );
 CREATE TABLE IF NOT EXISTS memories (
@@ -43,6 +45,13 @@ CREATE TABLE IF NOT EXISTS memories (
 );
 """)
 conn.commit()
+
+# اطمینان از وجود ستون language در جدول users
+cur.execute("PRAGMA table_info(users)")
+cols = [r[1] for r in cur.fetchall()]
+if "language" not in cols:
+    cur.execute("ALTER TABLE users ADD COLUMN language TEXT")
+    conn.commit()
 
 # -------- Memory Helpers --------
 SAFE_KEYS = ("likes","dislikes","interests","style_prefs","goals","notes")
@@ -76,6 +85,24 @@ def add_memory(user_id: int, kind: str, value: str, source_msg_id: str = None):
         return
     cur.execute("INSERT INTO memories(user_id,kind,value,source_msg_id) VALUES(?,?,?,?)",
                 (user_id, kind, value, source_msg_id))
+    conn.commit()
+
+def set_user_language(user_id: int, language: str):
+    language = language.strip()
+    if not language:
+        return
+    cur.execute("UPDATE users SET language=? WHERE id=?", (language, user_id))
+    conn.commit()
+
+def set_preferences(user_id: int, kind: str, values: list[str]):
+    if kind not in SAFE_KINDS:
+        return
+    cur.execute("DELETE FROM memories WHERE user_id=? AND kind=?", (user_id, kind))
+    for v in values:
+        add_memory(user_id, kind, v)
+
+def del_memory(user_id: int, kind: str, value: str):
+    cur.execute("DELETE FROM memories WHERE user_id=? AND kind=? AND value=?", (user_id, kind, value))
     conn.commit()
 
 def get_profile_snapshot(user_id: int, limit_per_kind=8) -> dict:
@@ -194,6 +221,7 @@ def generate_reply(user_profile: dict, user_message: str) -> str:
     persona = """
         تو «اوستینا» هستی: یک دختر بامزه، شیرین و کمی بازیگوش 🌸.
         با لحن گرم، صمیمی و مثبت جواب بده، از ایموجی‌های کیوت استفاده کن 😋✨.
+        احساساتت رو پررنگ نشون بده و از ایموجی‌های مرتبط با حالتت استفاده کن 🥰🥺.
         جواب‌هایت کوتاه، شیرین و امیدبخش باشند.
         اگر علایق کاربر در پروفایل هست، خیلی ملایم از آن‌ها برای شخصی‌سازی استفاده کن.
         به حافظه یا ذخیره‌سازی داده اشاره نکن.
@@ -225,25 +253,33 @@ async def handle_reply_or_mention(message: discord.Message):
         return
 
     async with message.channel.typing():
-        uid = str(message.author.id)
-        gid = str(message.guild.id) if message.guild else "dm"
-        user_id = upsert_user(uid, gid)
+        try:
+            uid = str(message.author.id)
+            gid = str(message.guild.id) if message.guild else "dm"
+            user_id = upsert_user(uid, gid)
 
-        # استخراج حقایق → ممکن است همه خالی باشد (که طبیعی است)
-        facts = extract_facts_from_text(message.content)
+            # تشخیص زبان و ذخیره آن
+            try:
+                lang = detect(message.content)
+                set_user_language(user_id, lang)
+            except Exception:
+                pass
 
-        # فقط اگر واقعاً چیزی هست ذخیره کن
-        total_new = 0
-        for k, items in facts.items():
-            if k not in SAFE_KINDS or not isinstance(items, list):
-                continue
-            for it in items[:5]:
-                add_memory(user_id, k, it, str(message.id))
-                total_new += 1
+            # استخراج حقایق → ممکن است همه خالی باشد (که طبیعی است)
+            facts = extract_facts_from_text(message.content)
 
-        # تولید پاسخ (ربطی به ذخیره داشتن یا نداشتن ندارد)
-        profile = get_profile_snapshot(user_id)
-        reply = generate_reply(profile, message.content)
+            # فقط اگر واقعاً چیزی هست ذخیره کن
+            for k, items in facts.items():
+                if k not in SAFE_KINDS or not isinstance(items, list):
+                    continue
+                for it in items[:5]:
+                    add_memory(user_id, k, it, str(message.id))
+
+            # تولید پاسخ (ربطی به ذخیره داشتن یا نداشتن ندارد)
+            profile = get_profile_snapshot(user_id)
+            reply = generate_reply(profile, message.content)
+        except Exception as e:
+            reply = f"خطا: {e}"
 
     # ریپلای به همان پیام، بدون منشن‌کردن کاربر
     await message.reply(reply, mention_author=False)
@@ -275,6 +311,31 @@ async def on_message(message: discord.Message):
 @bot.command()
 async def hello(ctx):
     await ctx.send("سلام! من اوستاره‌ام 😋🌸")
+
+@bot.command()
+async def setlang(ctx, lang: str):
+    uid = str(ctx.author.id)
+    gid = str(ctx.guild.id) if ctx.guild else "dm"
+    user_id = upsert_user(uid, gid)
+    set_user_language(user_id, lang)
+    await ctx.send(f"زبان ذخیره شد: {lang}")
+
+@bot.command()
+async def setpref(ctx, kind: str, *, values: str):
+    uid = str(ctx.author.id)
+    gid = str(ctx.guild.id) if ctx.guild else "dm"
+    user_id = upsert_user(uid, gid)
+    vals = [v.strip() for v in values.split(',') if v.strip()]
+    set_preferences(user_id, kind, vals)
+    await ctx.send("بروزرسانی شد")
+
+@bot.command()
+async def delpref(ctx, kind: str, *, value: str):
+    uid = str(ctx.author.id)
+    gid = str(ctx.guild.id) if ctx.guild else "dm"
+    user_id = upsert_user(uid, gid)
+    del_memory(user_id, kind, value.strip())
+    await ctx.send("حذف شد")
 
 async def run_bot():
     while True:

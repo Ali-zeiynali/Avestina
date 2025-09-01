@@ -1,3 +1,4 @@
 openai
 discord
 python-dotenv
+langdetect
