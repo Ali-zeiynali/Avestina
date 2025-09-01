@@ -1,5 +1,6 @@
 # bot_friend.py
-import os, json, re, sqlite3, asyncio
+import os, json, re, sqlite3, asyncio, time
+from collections import defaultdict, deque
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
@@ -15,6 +16,11 @@ DB_PATH = os.getenv("DB_PATH", "instance/app.db")
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
+
+# -------- Spam control --------
+MESSAGE_WINDOW = 60  # seconds
+MESSAGE_LIMIT = 10
+_user_msg_times: dict[int, deque] = defaultdict(deque)
 
 # -------- OpenAI Client --------
 client = OpenAI(api_key=OPENAI_API_KEY)
@@ -265,6 +271,16 @@ async def on_ready():
 async def on_message(message: discord.Message):
     if message.author == bot.user:
         return
+
+    uid = message.author.id
+    now = time.time()
+    times = _user_msg_times[uid]
+    while times and now - times[0] > MESSAGE_WINDOW:
+        times.popleft()
+    if len(times) >= MESSAGE_LIMIT:
+        await message.reply("خیلی داری حرف میزنی", mention_author=False)
+        return
+    times.append(now)
 
     mentioned = bot.user.mentioned_in(message)
     replied_to_bot = (
