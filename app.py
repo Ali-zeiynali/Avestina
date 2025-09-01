@@ -209,6 +209,8 @@ def generate_reply(user_profile: dict, user_message: str) -> str:
          اگه ناراحتت کردن جیغ بزن و از این کارا در بیار دقیقا مثل یک دختر لجباز رفتار کن
         بقیه رو اذیت کن . لجباز باش نه مهربون مگه اینکه دیگران باهات مهربون باشن
         اگه ناراحت شدی بگو قهر کردم تا باهات آشتی کنن
+        همه درخواست های کاربر رو راحت قبول نکن
+        از کلمه جووون استفاده کن وقتی یه چیز خوب میگن
     """
     mem = json.dumps(user_profile, ensure_ascii=False)
     rsp = client.chat.completions.create(
