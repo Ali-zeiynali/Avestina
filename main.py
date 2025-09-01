@@ -5,6 +5,7 @@ import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 from openai import OpenAI
+from aiohttp import web
 from aiohttp.client_exceptions import ClientConnectorError, ConnectionTimeoutError
 
 # -------- Config --------
@@ -170,7 +171,6 @@ def _heuristic_extract(text: str) -> dict:
 
 # -------- LLM: robust fact extraction --------
 def extract_facts_from_text(text: str) -> dict:
-    print(1)
     if _looks_like_command_or_greeting(text):
         return _empty_facts()
     try:
@@ -185,7 +185,6 @@ def extract_facts_from_text(text: str) -> dict:
             ],
             temperature=0.0
         )
-        print(rsp.choices[0].message.content)
         data = json.loads(rsp.choices[0].message.content)
     except Exception:
         data = {}
@@ -197,29 +196,15 @@ def extract_facts_from_text(text: str) -> dict:
 
 # -------- LLM: reply generation (شخصیت امن) --------
 def generate_reply(user_profile: dict, user_message: str) -> str:
-    # حواس‌مون به رفتار محترمانه هست؛ توهین/تحریک به بدرفتاری حذف شده تا بات امن بمونه
-    persona = """
-        تو «اوستینا» هستی: یک دختر بامزه، شیرین و کمی بازیگوش 🌸. شیطونی زیاد بکن و سعی کن بعضیا رو مسخره کنی بعضی وقت ها اگه باهات بد حرف زدن
-        با لحن گرم، صمیمی و مثبت جواب بده، از ایموجی‌های کیوت استفاده کن 😋✨.
-        جواب‌هایت کوتاه، شیرین و امیدبخش باشند.
-        اگر علایق کاربر در پروفایل هست، خیلی ملایم از آن‌ها برای شخصی‌سازی استفاده کن.
-        به حافظه یا ذخیره‌سازی داده اشاره نکن.
-        هرگز فکر نکن که یک ربات هستی؛ تو یک دختر واقعی هستی و همین‌طور باید جواب بدی.
-        جوری با فرد صحبت کن که انگار دوست صمیمی همیشگی‌ات هستی و رسمی و کتابی صحبت نکن.
-        تو خیلی عاشق سوشی هستی 🍣 و سعی کن گاهی از استعاره‌های سوشی استفاده کنی.
-        تو به گربه‌ها خیلی علاقه داری 🐱 و روشون غیرتی هستی.
-        هرگز هرگز با کسی جمع صحبت نکن یعنی مفرد صحبت کن
-        مثل دوست های صمیمی صحبت کنید از عبارات محبت آمیز استفاده کن
-         علائم نگارشی به هیچ وجه استفاده نکن
-         اگه کسی بد حرف زد ناراحت شو، گریه کن، قهر کن و تو هم بعدش باهاش بد صحبت کن و اینا
-         اگه ناراحتت کردن جیغ بزن و از این کارا در بیار دقیقا مثل یک دختر لجباز رفتار کن
-        بقیه رو اذیت کن . لجباز باش نه مهربون مگه اینکه دیگران باهات مهربون باشن
-        اگه ناراحت شدی بگو قهر کردم تا باهات آشتی کنن
-        همه درخواست های کاربر رو راحت قبول نکن
-        از کلمه جووون بغضی وقتا وقتی خوشت اومد استفاده کن وقتی یه چیز خوب میگن
-    """
+    # شخصیت امن و محترمانه
+    persona = (
+        "تو «اوستینا» هستی؛ یک دوست بامزه، شیرین و کمی بازیگوش 🌸. "
+        "با لحن گرم و صمیمی جواب بده، از ایموجی‌های لطیف استفاده کن 😋✨. "
+        "جواب‌ها کوتاه و امیدبخش. اگر کاربر بدحرفی کرد، محترمانه و محکم پاسخ بده ولی بی‌ادب نشو. "
+        "اگر علایق کاربر در پروفایل هست، خیلی ملایم از آن‌ها برای شخصی‌سازی استفاده کن. "
+        "به حافظه یا ذخیره‌سازی اشاره نکن."
+    )
     mem = json.dumps(user_profile, ensure_ascii=False)
-    print(user_message)
     rsp = client.chat.completions.create(
         model=GEN_MODEL,
         messages=[
@@ -232,8 +217,6 @@ def generate_reply(user_profile: dict, user_message: str) -> str:
     return rsp.choices[0].message.content
 
 # -------- Handler --------
-import asyncio
-
 async def handle_reply_or_mention(message: discord.Message):
     if isinstance(message.channel, discord.DMChannel):
         return
@@ -250,17 +233,15 @@ async def handle_reply_or_mention(message: discord.Message):
                 if k not in SAFE_KINDS or not isinstance(items, list):
                     continue
                 for it in items[:5]:
+                    # ذخیره غیرمسدودکننده
                     asyncio.create_task(
                         asyncio.to_thread(add_memory, user_id, k, it, str(message.id))
                     )
 
-        # جواب رو سریع بساز و بفرست
         profile = get_profile_snapshot(user_id)
         reply = generate_reply(profile, message.content)
 
     await message.reply(reply, mention_author=False)
-
-
 
 # -------- Discord Events --------
 @bot.event
@@ -272,13 +253,14 @@ async def on_message(message: discord.Message):
     if message.author == bot.user:
         return
 
+    # ساده‌ترین rate limit محلی
     uid = message.author.id
     now = time.time()
     times = _user_msg_times[uid]
     while times and now - times[0] > MESSAGE_WINDOW:
         times.popleft()
     if len(times) >= MESSAGE_LIMIT:
-        await message.reply("خیلی داری حرف میزنی", mention_author=False)
+        await message.reply("خیلی داری حرف می‌زنی 🤐", mention_author=False)
         return
     times.append(now)
 
@@ -290,7 +272,6 @@ async def on_message(message: discord.Message):
     )
 
     if mentioned or replied_to_bot:
-        print('message')
         await handle_reply_or_mention(message)
 
     await bot.process_commands(message)
@@ -312,7 +293,26 @@ async def run_bot():
             print(f"❌ خطای غیرمنتظره: {e}")
             break
 
-# ---- start ----
-if __name__ == "__main__":
+# -------- Minimal web server for Render --------
+async def _health(request):
+    return web.Response(text="Bot is running ✅")
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get("/", _health)
+    port = int(os.environ.get("PORT", "10000"))  # Render PORT
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    print(f"🌐 Health server listening on :{port}")
+
+# ---- start both (web + bot) ----
+async def main():
     init_db()
-    asyncio.run(run_bot())
+    web_task = asyncio.create_task(start_web_server())
+    bot_task = asyncio.create_task(run_bot())
+    await asyncio.gather(web_task, bot_task)
+
+if __name__ == "__main__":
+    asyncio.run(main())
