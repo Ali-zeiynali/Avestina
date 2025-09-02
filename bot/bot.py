@@ -24,6 +24,7 @@ def build_bot(handler: InteractionHandler, message_window: int, message_limit: i
     @bot.event
     async def on_ready():
         logger.info(f"Logged in as {bot.user}")
+        print(f"Logged in as {bot.user}")
 
     @bot.event
     async def on_message(message: discord.Message):
@@ -64,7 +65,7 @@ def build_bot(handler: InteractionHandler, message_window: int, message_limit: i
             return
         state.store_memory = enabled
         await ctx.reply(
-            f"Memory storing {'enabled' if enabled else 'disabled'}",
+            f"*[Avestina] config: Memory storing {'enabled*' if enabled else 'disabled*'}",
             mention_author=False,
         )
 
