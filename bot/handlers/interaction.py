@@ -1,0 +1,32 @@
+# bot_friend/handlers/interaction.py
+import discord
+from ..repositories.users_repo import upsert_user
+from ..repositories.messages_repo import fetch_user_bot_history
+from ..services.history_service import rows_to_openai_messages
+from ..services.reply_service import ReplyService
+from .persistence import persist_message
+
+class InteractionHandler:
+    def __init__(self, db_path: str, reply_service: ReplyService):
+        self.db_path = db_path
+        self.reply_service = reply_service
+
+    async def handle_reply_or_mention(self, message: discord.Message):
+        if isinstance(message.channel, discord.DMChannel):
+            return
+
+        gid = str(message.guild.id) if message.guild else "dm"
+        cid = str(message.channel.id)
+        user_internal_id = upsert_user(self.db_path, str(message.author.id), gid)
+
+        # تاریخچهٔ کاربر↔️بات
+        rows = fetch_user_bot_history(self.db_path, gid, cid, user_internal_id, limit=14)
+        history = rows_to_openai_messages(rows, latest_user_text=message.content, max_chars=3500)
+
+        reply_text = self.reply_service.generate(history)
+
+        async with message.channel.typing():
+            sent = await message.reply(reply_text, mention_author=False)
+
+        # جواب بات را هم ذخیره کن
+        await persist_message(self.db_path, sent, is_bot_reply=True)
