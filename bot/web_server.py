@@ -1,5 +1,6 @@
 # bot_friend/web_server.py
 from aiohttp import web
+from .state import logger
 
 async def _health(request):
     return web.Response(text="Bot is running ✅")
@@ -11,4 +12,4 @@ async def start_web_server(port: int):
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
-    print(f"🌐 Health server listening on :{port}")
+    logger.info(f"Health server listening on :{port}")
