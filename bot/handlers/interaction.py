@@ -5,6 +5,7 @@ from ..repositories.messages_repo import fetch_user_bot_history
 from ..services.history_service import rows_to_openai_messages
 from ..services.reply_service import ReplyService
 from .persistence import persist_message
+from ..state import state, logger
 
 class InteractionHandler:
     def __init__(self, db_path: str, reply_service: ReplyService):
@@ -21,14 +22,18 @@ class InteractionHandler:
         user_internal_id = upsert_user(self.db_path, str(message.author.id), gid)
 
         # تاریخچهٔ کاربر↔️بات
-        rows = fetch_user_bot_history(self.db_path, gid, cid, user_internal_id, limit=14)
-        history = rows_to_openai_messages(rows, latest_user_text=message.content, max_chars=3500)
+        if state.send_history:
+            rows = fetch_user_bot_history(self.db_path, gid, cid, user_internal_id, limit=14)
+            history = rows_to_openai_messages(rows, latest_user_text=message.content, max_chars=3500)
 
-        known = any(r[0] == 1 for r in rows)
-        if known:
-            history.insert(0, {"role": "system", "content": "این کاربر دوستت هست و قبلاً باهات صحبت کرده پس خیلی گرم و صمیمی جواب بده"})
+            known = any(r[0] == 1 for r in rows)
+            if known:
+                history.insert(0, {"role": "system", "content": "این کاربر دوستت هست و قبلاً باهات صحبت کرده پس خیلی گرم و صمیمی جواب بده"})
+            else:
+                history.insert(0, {"role": "system", "content": "این اولین بار است که این فرد با تو حرف می‌زند؛ با کمی شک و تردید جواب بده و به راحتی صمیمی نشو"})
         else:
-            history.insert(0, {"role": "system", "content": "این اولین بار است که این فرد با تو حرف می‌زند؛ با کمی شک و تردید جواب بده و به راحتی صمیمی نشو"})
+            history = [{"role": "user", "content": message.content}]
+            known = False
 
         reply_text = self.reply_service.generate(history).strip()
 
@@ -41,4 +46,8 @@ class InteractionHandler:
         self._last_replies[user_internal_id] = reply_text
 
         # جواب بات را هم ذخیره کن
-        await persist_message(self.db_path, sent, is_bot_reply=True)
+        if state.store_memory:
+            try:
+                await persist_message(self.db_path, sent, is_bot_reply=True)
+            except Exception as e:
+                logger.debug(f"[persist] {e}")

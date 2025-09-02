@@ -15,12 +15,15 @@ class Settings:
     msg_window_seconds: int
     msg_limit: int
     web_port: int
+    admin_user_id: int | None
 
 def get_settings() -> Settings:
     db_path = os.getenv("DB_PATH", "database/app.db")
     if not os.path.isabs(db_path):
         root = Path(__file__).resolve().parent.parent
         db_path = str((root / db_path).resolve())
+
+    admin_id = os.getenv("ADMIN_USER_ID")
 
     return Settings(
         token=os.getenv("DISCORD_TOKEN", ""),
@@ -30,4 +33,5 @@ def get_settings() -> Settings:
         msg_window_seconds=int(os.getenv("MESSAGE_WINDOW", "60")),
         msg_limit=int(os.getenv("MESSAGE_LIMIT", "10")),
         web_port=int(os.getenv("PORT", "10000")),
+        admin_user_id=int(admin_id) if admin_id else None,
     )
