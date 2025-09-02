@@ -36,6 +36,7 @@ def build_bot(handler: InteractionHandler, message_window: int, message_limit: i
             await message.reply("خیلی داری حرف می‌زنی 🤐", mention_author=False)
             return
 
+
         mentioned = bot.user.mentioned_in(message)
         replied_to_bot = (
             message.reference is not None and
@@ -44,14 +45,15 @@ def build_bot(handler: InteractionHandler, message_window: int, message_limit: i
         )
 
         if mentioned or replied_to_bot:
+            print(message)
             async with message.channel.typing():
                 await handler.handle_reply_or_mention(message)
 
         await bot.process_commands(message)
 
     @bot.command()
-    async def hello(ctx):
-        await ctx.send("سلام! من اوستینا هستم 😋🌸")
+    async def offtest(ctx):
+        await ctx.send("[Avestina bot]: Debug mode has been offed - code: 002")
 
     return bot
 
