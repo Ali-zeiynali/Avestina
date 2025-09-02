@@ -1,6 +1,7 @@
 # bot_friend/discord_bot.py
 import discord
 import asyncio
+from discord import app_commands
 from discord.ext import commands
 from .ratelimit import RateLimiter
 from .handlers.persistence import persist_message
@@ -9,16 +10,21 @@ from .config import get_settings
 from .db import init_db
 from .services.reply_service import ReplyService
 from .web_server import start_web_server
+from .state import state, logger, set_debug
 
-def build_bot(handler: InteractionHandler, message_window: int, message_limit: int) -> commands.Bot:
+def build_bot(handler: InteractionHandler, message_window: int, message_limit: int, admin_id: int | None) -> commands.Bot:
     intents = discord.Intents.default()
     intents.message_content = True
     bot = commands.Bot(command_prefix="!", intents=intents)
     limiter = RateLimiter(message_window, message_limit)
 
+    def _is_admin(uid: int) -> bool:
+        return admin_id is not None and uid == admin_id
+
     @bot.event
     async def on_ready():
-        print(f"✅ Logged in as {bot.user}")
+        await bot.tree.sync()
+        logger.info(f"Logged in as {bot.user}")
 
     @bot.event
     async def on_message(message: discord.Message):
@@ -26,10 +32,11 @@ def build_bot(handler: InteractionHandler, message_window: int, message_limit: i
             return
 
         # ذخیرهٔ همهٔ پیام‌ها
-        try:
-            await persist_message(handler.db_path, message, is_bot_reply=False)
-        except Exception as e:
-            print(f"[persist] {e}")
+        if state.store_memory:
+            try:
+                await persist_message(handler.db_path, message, is_bot_reply=False)
+            except Exception as e:
+                logger.debug(f"[persist] {e}")
 
         # Rate limit
         if not limiter.allow(message.author.id):
@@ -45,15 +52,38 @@ def build_bot(handler: InteractionHandler, message_window: int, message_limit: i
         )
 
         if mentioned or replied_to_bot:
-            print(message)
+            logger.debug(str(message))
             async with message.channel.typing():
                 await handler.handle_reply_or_mention(message)
 
         await bot.process_commands(message)
 
-    @bot.command()
-    async def offtest(ctx):
-        await ctx.send("[Avestina bot]: Debug mode has been offed - code: 002")
+    @bot.tree.command(name="memory_store", description="Enable or disable storing messages")
+    @app_commands.describe(enabled="Enable storing")
+    async def memory_store_cmd(interaction: discord.Interaction, enabled: bool):
+        if not _is_admin(interaction.user.id):
+            await interaction.response.send_message("You cannot use this command.", ephemeral=True)
+            return
+        state.store_memory = enabled
+        await interaction.response.send_message(f"Memory storing {'enabled' if enabled else 'disabled'}", ephemeral=True)
+
+    @bot.tree.command(name="memory_send", description="Enable or disable sending history to API")
+    @app_commands.describe(enabled="Enable sending history")
+    async def memory_send_cmd(interaction: discord.Interaction, enabled: bool):
+        if not _is_admin(interaction.user.id):
+            await interaction.response.send_message("You cannot use this command.", ephemeral=True)
+            return
+        state.send_history = enabled
+        await interaction.response.send_message(f"History sending {'enabled' if enabled else 'disabled'}", ephemeral=True)
+
+    @bot.tree.command(name="debug", description="Enable or disable debug mode")
+    @app_commands.describe(enabled="Enable debug mode")
+    async def debug_cmd(interaction: discord.Interaction, enabled: bool):
+        if not _is_admin(interaction.user.id):
+            await interaction.response.send_message("You cannot use this command.", ephemeral=True)
+            return
+        set_debug(enabled)
+        await interaction.response.send_message(f"Debug mode {'enabled' if enabled else 'disabled'}", ephemeral=True)
 
     return bot
 
@@ -63,7 +93,7 @@ def _build():
     reply_service = ReplyService(api_key=s.openai_api_key, model=s.model)
     from .handlers.interaction import InteractionHandler
     handler = InteractionHandler(db_path=s.db_path, reply_service=reply_service)
-    bot = build_bot(handler, s.msg_window_seconds, s.msg_limit)
+    bot = build_bot(handler, s.msg_window_seconds, s.msg_limit, s.admin_user_id)
     return s, bot
 
 async def run():
@@ -75,7 +105,7 @@ async def run():
             try:
                 await bot.start(s.token)
             except Exception as e:
-                print(f"⚠️ Bot error: {e}. retrying in 10s…")
+                logger.warning(f"Bot error: {e}. retrying in 10s…")
                 await asyncio.sleep(10)
 
     bot_task = asyncio.create_task(run_bot())
