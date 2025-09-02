@@ -1,6 +1,7 @@
 # bot_friend/discord_bot.py
 import discord
 import asyncio
+from discord import app_commands
 from discord.ext import commands
 from .ratelimit import RateLimiter
 from .handlers.persistence import persist_message
@@ -14,7 +15,7 @@ from .state import state, logger, set_debug
 def build_bot(handler: InteractionHandler, message_window: int, message_limit: int, admin_id: int | None) -> commands.Bot:
     intents = discord.Intents.default()
     intents.message_content = True
-    bot = commands.Bot(command_prefix="!", intents=intents)
+    bot = commands.Bot(command_prefix="!A!", intents=intents)
     limiter = RateLimiter(message_window, message_limit)
 
     def _is_admin(uid: int) -> bool:
@@ -59,7 +60,7 @@ def build_bot(handler: InteractionHandler, message_window: int, message_limit: i
     @bot.command(name="memory_store")
     async def memory_store_cmd(ctx: commands.Context, enabled: bool):
         if not _is_admin(ctx.author.id):
-            await ctx.reply("You cannot use this command.", mention_author=False)
+            await ctx.reply("*[Avestina] perm: You cannot use this command.*", mention_author=False)
             return
         state.store_memory = enabled
         await ctx.reply(
@@ -70,22 +71,22 @@ def build_bot(handler: InteractionHandler, message_window: int, message_limit: i
     @bot.command(name="memory_send")
     async def memory_send_cmd(ctx: commands.Context, enabled: bool):
         if not _is_admin(ctx.author.id):
-            await ctx.reply("You cannot use this command.", mention_author=False)
+            await ctx.reply("*[Avestina] perm: You cannot use this command.*", mention_author=False)
             return
         state.send_history = enabled
         await ctx.reply(
-            f"History sending {'enabled' if enabled else 'disabled'}",
+            f"*[Avestina] config: History sending {'enabled*' if enabled else 'disabled*'}",
             mention_author=False,
         )
 
     @bot.command(name="debug")
     async def debug_cmd(ctx: commands.Context, enabled: bool):
         if not _is_admin(ctx.author.id):
-            await ctx.reply("You cannot use this command.", mention_author=False)
+            await ctx.reply("*[Avestina] perm: You cannot use this command.*", mention_author=False)
             return
         set_debug(enabled)
         await ctx.reply(
-            f"Debug mode {'enabled' if enabled else 'disabled'}",
+            f"*[Avestina] config: Debug mode {'enabled*' if enabled else 'disabled*'}",
             mention_author=False,
         )
 
