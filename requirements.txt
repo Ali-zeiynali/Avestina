@@ -1,4 +1,5 @@
 discord.py>=2.3.0
 python-dotenv>=1.0.0
-openai>=1.40.0
 aiohttp>=3.9.0
+transformers>=4.56.1
+torch>=2.8.0

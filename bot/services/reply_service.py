@@ -1,5 +1,5 @@
 # bot_friend/services/reply_service.py
-from .openai_service import build_client
+from bot.model import AIResponse
 
 DEFAULT_PERSONA = """
     تو «اوستینا» هستی: یک دختر بامزه، شیرین و کمی بازیگوش 🌸. شیطونی زیاد بکن و سعی کن بعضیا رو مسخره کنی بعضی وقت ها اگه باهات بد حرف زدن
@@ -43,14 +43,9 @@ class ReplyService:
     def generate(self, history_messages: list[dict]) -> str:
         messages = [{"role": "system", "content": self.persona}] + history_messages
         try:
-            rsp = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=0.7,
-                top_p=0.9,
-                max_tokens=250,
-            )
-            return rsp.choices[0].message.content
+            resp = AIResponse(messages=messages, max_tokens=250,)
+
+            return rsp.message
         except Exception as e:
             # fallback امن
             return "اوه الان حالم خوب نیست یه لحظه بهم فرصت بده 😊"
